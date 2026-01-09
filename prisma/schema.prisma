@@ -1,0 +1,666 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_PRISMA_URL")
+  directUrl = env("POSTGRES_URL_NON_POOLING")
+}
+
+// ============================================
+// AUTENTICAÇÃO E USUÁRIOS
+// ============================================
+
+enum UserRole {
+  ADMIN           // Acesso total, pode travar sistema
+  FULL_ACCESS     // Acesso total exceto travas de sistema
+  LIMITED_ACCESS  // Acesso limitado a processos específicos
+  READ_ONLY       // Somente visualização
+}
+
+model User {
+  id                String    @id @default(cuid())
+  name              String
+  email             String    @unique
+  emailVerified     DateTime?
+  image             String?
+  password          String?   // Hash bcrypt
+  role              UserRole  @default(READ_ONLY)
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // WebAuthn credentials (biometria)
+  credentials       Credential[]
+  
+  // Processos que o usuário é responsável
+  responsibleFor    LegalCase[]
+  
+  // Atividades registradas
+  activities        ActivityLog[]
+  
+  // Observações privadas (apenas admin)
+  privateNotes      PrivateNote[]
+  
+  // Mensagens WhatsApp enviadas
+  whatsappMessages  WhatsAppMessage[]
+  
+  accounts          Account[]
+  sessions          Session[]
+  
+  @@index([email])
+}
+
+model Credential {
+  id                String   @id @default(cuid())
+  userId            String
+  credentialID      String   @unique
+  credentialPublicKey Bytes
+  counter           BigInt
+  credentialDeviceType String
+  credentialBackedUp Boolean
+  transports        String?
+  
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String? @db.Text
+  access_token       String? @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String? @db.Text
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ============================================
+// CLIENTES
+// ============================================
+
+model Client {
+  id                String      @id @default(cuid())
+  
+  // Dados Pessoais
+  name              String
+  cpf               String?     @unique
+  rg                String?
+  birthDate         DateTime?
+  nationality       String?
+  maritalStatus     String?
+  profession        String?
+  
+  // Contato
+  email             String?
+  phone             String?
+  mobile            String?
+  whatsapp          String?
+  
+  // Endereço
+  address           String?
+  addressNumber     String?
+  addressComplement String?
+  neighborhood      String?
+  city              String?
+  state             String?
+  zipCode           String?
+  
+  // Documentos e Foto
+  photoUrl          String?
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relações
+  legalCases        LegalCase[]
+  documents         Document[]
+  reminders         Reminder[]
+  powerOfAttorneys  PowerOfAttorney[]
+  privateNotes      PrivateNote[]
+  
+  @@index([cpf])
+  @@index([name])
+}
+
+// ============================================
+// PROCESSOS JUDICIAIS
+// ============================================
+
+enum CaseStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+  FINISHED
+}
+
+model LegalCase {
+  id                String      @id @default(cuid())
+  caseNumber        String      @unique
+  clientId          String
+  responsibleId     String?     // Usuário responsável
+  
+  // Informações do Processo
+  type              String      // Tipo de ação
+  court             String?
+  district          String?
+  opposingParty     String?     // Parte contrária
+  status            CaseStatus  @default(ACTIVE)
+  
+  // Datas importantes
+  filingDate        DateTime?
+  lastUpdate        DateTime?
+  
+  // Observações
+  notes             String?     @db.Text
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relações
+  client            Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  responsible       User?       @relation(fields: [responsibleId], references: [id])
+  documents         Document[]
+  deadlines         Deadline[]
+  hearings          Hearing[]
+  publications      Publication[]
+  reminders         Reminder[]
+  privateNotes      PrivateNote[]
+  
+  @@index([clientId])
+  @@index([responsibleId])
+  @@index([caseNumber])
+  @@index([status])
+}
+
+// ============================================
+// DOCUMENTOS
+// ============================================
+
+enum DocumentType {
+  IDENTITY          // RG, CPF
+  ADDRESS_PROOF     // Comprovante de residência
+  PAYCHECK          // Contracheque
+  TIMESHEET         // Espelho de ponto
+  CONTRACT          // Contrato
+  COURT_DOCUMENT    // Documento judicial
+  PHOTO             // Foto do cliente
+  OTHER             // Outros
+}
+
+enum DocumentStatus {
+  PENDING           // Aguardando upload
+  UPLOADED          // Enviado, aguardando extração
+  EXTRACTED         // Dados extraídos, aguardando validação
+  VALIDATED         // Validado por humano
+  REJECTED          // Rejeitado
+}
+
+model Document {
+  id                String          @id @default(cuid())
+  clientId          String?
+  legalCaseId       String?
+  hearingId         String?
+  
+  // Informações do documento
+  name              String
+  type              DocumentType
+  status            DocumentStatus  @default(UPLOADED)
+  url               String          // URL no blob storage
+  mimeType          String
+  size              Int
+  
+  // Dados extraídos (JSON)
+  extractedData     Json?
+  
+  // Validação
+  validatedAt       DateTime?
+  validatedBy       String?
+  validationNotes   String?         @db.Text
+  
+  // Timestamps
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relações
+  client            Client?         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  legalCase         LegalCase?      @relation(fields: [legalCaseId], references: [id], onDelete: Cascade)
+  hearing           Hearing?        @relation(fields: [hearingId], references: [id], onDelete: Cascade)
+  
+  @@index([clientId])
+  @@index([legalCaseId])
+  @@index([status])
+  @@index([type])
+}
+
+// ============================================
+// PRAZOS E LEMBRETES
+// ============================================
+
+enum DeadlineStatus {
+  PENDING
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum DeadlinePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Deadline {
+  id                String          @id @default(cuid())
+  legalCaseId       String
+  
+  // Informações do prazo
+  title             String
+  description       String?         @db.Text
+  dueDate           DateTime
+  priority          DeadlinePriority @default(MEDIUM)
+  status            DeadlineStatus  @default(PENDING)
+  
+  // Responsável
+  assignedTo        String?         // User ID
+  
+  // Controle
+  completedAt       DateTime?
+  completedBy       String?
+  
+  // Timestamps
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relações
+  legalCase         LegalCase       @relation(fields: [legalCaseId], references: [id], onDelete: Cascade)
+  reminders         Reminder[]
+  
+  @@index([legalCaseId])
+  @@index([dueDate])
+  @@index([status])
+  @@index([assignedTo])
+}
+
+model Reminder {
+  id                String      @id @default(cuid())
+  clientId          String?
+  legalCaseId       String?
+  deadlineId        String?
+  
+  // Informações do lembrete
+  title             String
+  description       String?     @db.Text
+  reminderDate      DateTime
+  isRecurring       Boolean     @default(false)
+  recurringPattern  String?     // "daily", "weekly", "monthly", "yearly"
+  
+  // Status
+  isDismissed       Boolean     @default(false)
+  dismissedAt       DateTime?
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relações
+  client            Client?     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  legalCase         LegalCase?  @relation(fields: [legalCaseId], references: [id], onDelete: Cascade)
+  deadline          Deadline?   @relation(fields: [deadlineId], references: [id], onDelete: Cascade)
+  
+  @@index([reminderDate])
+  @@index([isDismissed])
+}
+
+// ============================================
+// AUDIÊNCIAS
+// ============================================
+
+enum HearingType {
+  INITIAL
+  CONCILIATION
+  INSTRUCTION
+  JUDGMENT
+  OTHER
+}
+
+model Hearing {
+  id                String      @id @default(cuid())
+  legalCaseId       String
+  
+  // Informações da audiência
+  type              HearingType
+  date              DateTime
+  time              String?
+  location          String?
+  judge             String?
+  
+  // Análise de IA
+  aiAnalysis        Json?       // Resultado da análise ChatGPT + NotebookLM
+  analyzedAt        DateTime?
+  
+  // Observações
+  notes             String?     @db.Text
+  outcome           String?     @db.Text
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relações
+  legalCase         LegalCase   @relation(fields: [legalCaseId], references: [id], onDelete: Cascade)
+  documents         Document[]
+  
+  @@index([legalCaseId])
+  @@index([date])
+}
+
+// ============================================
+// PROCURAÇÕES
+// ============================================
+
+enum PowerOfAttorneyStatus {
+  DRAFT
+  GENERATED
+  SIGNED
+  REVOKED
+}
+
+model PowerOfAttorney {
+  id                String                  @id @default(cuid())
+  clientId          String
+  
+  // Informações da procuração
+  templateId        String?
+  opposingParty     String?
+  customFields      Json?                   // Campos customizados do template
+  
+  // Documento gerado
+  documentUrl       String?
+  status            PowerOfAttorneyStatus   @default(DRAFT)
+  
+  // Datas
+  generatedAt       DateTime?
+  signedAt          DateTime?
+  revokedAt         DateTime?
+  
+  // Timestamps
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  
+  // Relações
+  client            Client                  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  template          Template?               @relation(fields: [templateId], references: [id])
+  
+  @@index([clientId])
+  @@index([status])
+}
+
+// ============================================
+// TEMPLATES
+// ============================================
+
+enum TemplateType {
+  POWER_OF_ATTORNEY
+  CONTRACT
+  PETITION
+  OTHER
+}
+
+model Template {
+  id                String              @id @default(cuid())
+  
+  // Informações do template
+  name              String
+  type              TemplateType
+  content           String              @db.Text
+  variables         Json?               // Variáveis disponíveis no template
+  
+  // Status
+  isActive          Boolean             @default(true)
+  
+  // Timestamps
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  // Relações
+  powerOfAttorneys  PowerOfAttorney[]
+  
+  @@index([type])
+  @@index([isActive])
+}
+
+// ============================================
+// PUBLICAÇÕES (DJEN)
+// ============================================
+
+model Publication {
+  id                String      @id @default(cuid())
+  legalCaseId       String?
+  
+  // Dados da publicação
+  djenLink          String
+  parties           String?
+  caseNumber        String?
+  deadline          DateTime?
+  content           String?     @db.Text
+  
+  // Status de processamento
+  isProcessed       Boolean     @default(false)
+  processedAt       DateTime?
+  
+  // Data da publicação
+  publicationDate   DateTime
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relações
+  legalCase         LegalCase?  @relation(fields: [legalCaseId], references: [id])
+  
+  @@index([legalCaseId])
+  @@index([publicationDate])
+  @@index([isProcessed])
+}
+
+// ============================================
+// DIÁRIO OFICIAL FHEMIG
+// ============================================
+
+model OfficialGazette {
+  id                String      @id @default(cuid())
+  
+  // Informações da edição
+  editionNumber     String      @unique
+  publicationDate   DateTime
+  downloadUrl       String?
+  
+  // Dados extraídos
+  fhemigData        Json?
+  
+  // Status
+  isProcessed       Boolean     @default(false)
+  processedAt       DateTime?
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  @@index([publicationDate])
+  @@index([isProcessed])
+}
+
+// ============================================
+// WHATSAPP
+// ============================================
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model WhatsAppMessage {
+  id                String        @id @default(cuid())
+  sentBy            String
+  
+  // Destinatário
+  recipientPhone    String
+  recipientName     String?
+  
+  // Mensagem
+  message           String        @db.Text
+  templateUsed      String?
+  
+  // Status
+  status            MessageStatus @default(PENDING)
+  confirmedBefore   Boolean       @default(false)
+  
+  // Timestamps
+  createdAt         DateTime      @default(now())
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  
+  // Relações
+  sender            User          @relation(fields: [sentBy], references: [id])
+  
+  @@index([sentBy])
+  @@index([recipientPhone])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================
+// LOG DE ATIVIDADES
+// ============================================
+
+enum ActivityType {
+  CLIENT_CREATED
+  CLIENT_UPDATED
+  CLIENT_DELETED
+  CASE_CREATED
+  CASE_UPDATED
+  CASE_DELETED
+  DOCUMENT_UPLOADED
+  DOCUMENT_VALIDATED
+  DOCUMENT_DELETED
+  DEADLINE_CREATED
+  DEADLINE_COMPLETED
+  DEADLINE_DELETED
+  USER_LOGIN
+  USER_LOGOUT
+  SYSTEM_LOCKED
+  SYSTEM_UNLOCKED
+  OTHER
+}
+
+model ActivityLog {
+  id                String        @id @default(cuid())
+  userId            String
+  
+  // Atividade
+  type              ActivityType
+  description       String        @db.Text
+  metadata          Json?
+  
+  // IP e User Agent
+  ipAddress         String?
+  userAgent         String?
+  
+  // Timestamp
+  createdAt         DateTime      @default(now())
+  
+  // Relações
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ============================================
+// OBSERVAÇÕES PRIVADAS (ADMIN ONLY)
+// ============================================
+
+model PrivateNote {
+  id                String      @id @default(cuid())
+  userId            String
+  clientId          String?
+  legalCaseId       String?
+  
+  // Conteúdo
+  content           String      @db.Text
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relações
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client            Client?     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  legalCase         LegalCase?  @relation(fields: [legalCaseId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([clientId])
+  @@index([legalCaseId])
+}
+
+// ============================================
+// CONFIGURAÇÕES DO SISTEMA
+// ============================================
+
+model SystemSettings {
+  id                String      @id @default(cuid())
+  
+  // Identidade Visual
+  logoUrl           String?
+  primaryColor      String?
+  secondaryColor    String?
+  
+  // Segurança
+  isSystemLocked    Boolean     @default(false)
+  lockedBy          String?
+  lockedAt          DateTime?
+  
+  // Frases Motivacionais
+  motivationalQuotes Json?
+  
+  // Configurações de WhatsApp
+  whatsappEnabled   Boolean     @default(false)
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+}

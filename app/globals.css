@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        /* Rogério Almeida brand colors */
+        --background: 0 0% 100%;
+        --foreground: 260 10% 28%;
+        /* Dark grey #45414d */
+        --card: 0 0% 100%;
+        --card-foreground: 260 10% 28%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 260 10% 28%;
+        --primary: 1 42% 36%;
+        /* Burgundy #843534 */
+        --primary-foreground: 0 0% 100%;
+        --secondary: 38 26% 73%;
+        /* Gold #ccb68d */
+        --secondary-foreground: 260 10% 28%;
+        --muted: 0 0% 96%;
+        --muted-foreground: 0 0% 45%;
+        --accent: 38 26% 73%;
+        /* Gold accent */
+        --accent-foreground: 260 10% 28%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 91%;
+        --input: 0 0% 91%;
+        --ring: 1 42% 36%;
+        /* Burgundy ring */
+        --radius: 0.5rem;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+
+    body {
+        @apply bg-background text-foreground;
+        font-feature-settings: "rlig" 1, "calt" 1;
+        font-family: var(--font-roboto), system-ui, sans-serif;
+    }
+
+    .font-serif {
+        font-family: var(--font-alegreya), Georgia, serif;
+    }
+}
+
+@layer utilities {
+    .animate-in {
+        animation: fade-in 0.3s ease-out;
+    }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    @apply bg-muted;
+}
+
+::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-md;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+}
