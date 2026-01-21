@@ -1,10 +1,12 @@
 import React from 'react';
 
-interface ResponsiveTableProps<T> {
+type ColumnAccessor<T> = keyof T | ((item: T) => React.ReactNode);
+
+interface ResponsiveTableProps<T extends Record<PropertyKey, unknown>> {
     data: T[];
     columns: {
         header: string;
-        accessor: keyof T | ((item: T) => React.ReactNode);
+        accessor: ColumnAccessor<T>;
         className?: string;
         mobileLabel?: string;
     }[];
@@ -13,18 +15,28 @@ interface ResponsiveTableProps<T> {
     mobileCardRender?: (item: T) => React.ReactNode;
 }
 
-export function ResponsiveTable<T>({
+export function ResponsiveTable<T extends Record<PropertyKey, unknown>>({
     data,
     columns,
     onRowClick,
     keyExtractor,
     mobileCardRender,
 }: ResponsiveTableProps<T>) {
-    const getCellValue = (item: T, accessor: any) => {
+    const toCellNode = (value: unknown): React.ReactNode => {
+        if (value == null) return null;
+        if (React.isValidElement(value)) return value;
+        if (typeof value === 'string') return value;
+        if (typeof value === 'number') return value;
+        if (typeof value === 'bigint') return value.toString();
+        if (typeof value === 'boolean') return value ? 'Sim' : 'Não';
+        return String(value);
+    };
+
+    const getCellValue = (item: T, accessor: ColumnAccessor<T>): React.ReactNode => {
         if (typeof accessor === 'function') {
             return accessor(item);
         }
-        return item[accessor];
+        return toCellNode(item[accessor]);
     };
 
     return (
